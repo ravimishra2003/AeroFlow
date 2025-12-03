@@ -2,7 +2,6 @@ package com.flightbooking.service;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -17,7 +16,6 @@ import com.flightbooking.enums.BookingStatus;
 import com.flightbooking.exception.BookingNotFoundException;
 import com.flightbooking.exception.FlightNotFoundException;
 import com.flightbooking.exception.IdNotFoundException;
-import com.flightbooking.exception.NoRecordException;
 import com.flightbooking.exception.PassengerNotFoundException;
 import com.flightbooking.exception.PaymentNotFound;
 import com.flightbooking.exception.SeatNotAvailable;
@@ -25,126 +23,123 @@ import com.flightbooking.repository.BookingRepository;
 import com.flightbooking.repository.FlightRepository;
 
 import jakarta.transaction.Transactional;
+
 @Service
 public class BookingService {
+
     @Autowired
     private BookingDao bookingDao;
+
     @Autowired
     private FlightRepository flightRepo;
+
     @Autowired
     private BookingRepository bookingRepository;
-    
+
+    // CREATE BOOKING ==============================
     @Transactional
     public Booking createBooking(Booking booking) {
+
+        // Validate passengers
         List<Passenger> passengers = booking.getPassengers();
         if (passengers == null || passengers.isEmpty()) {
             throw new PassengerNotFoundException("At least one passenger required");
         }
-        for (Passenger p : passengers) {
-            if (p != null) {
-            	p.setBooking(booking);
-            }
-        }
+        passengers.forEach(p -> {
+            if (p != null) p.setBooking(booking);
+        });
+
+        // Validate payment
         if (booking.getPayment() == null) {
             throw new PaymentNotFound("Payment information required");
         }
         booking.getPayment().setBooking(booking);
 
+        // Validate flight
         if (booking.getFlight() == null || booking.getFlight().getId() == null) {
             throw new FlightNotFoundException("Flight id is required");
         }
         Flight found = flightRepo.findById(booking.getFlight().getId())
-                .orElseThrow(() -> new FlightNotFoundException("Flight not found with id: " + booking.getFlight().getId()));
-        
-        int passengerCount = passengers.size();
-        int availableSeat = found.getTotalSeats();
+                .orElseThrow(() -> new FlightNotFoundException(
+                        "Flight not found with id: " + booking.getFlight().getId()));
 
-        if (passengerCount > availableSeat) {
+        // Check seat availability
+        int passengerCount = passengers.size();
+        int availableSeats = found.getTotalSeats();
+
+        if (passengerCount > availableSeats) {
             throw new SeatNotAvailable("Not enough seats available");
         }
-        double flightPrice = found.getPrice();
-        double totalAmount = flightPrice * passengerCount;
-        found.setTotalSeats(availableSeat - passengerCount);
+
+        // Price calculation
+        double totalAmount = found.getPrice() * passengerCount;
+
+        found.setTotalSeats(availableSeats - passengerCount);
         booking.setFlight(found);
         booking.getPayment().setAmount(totalAmount);
+
         return bookingDao.createBooking(booking);
     }
 
+    // READ ALL ======================================
     public List<Booking> getAllBooking() {
-        return bookingDao.getAllBooking();
+        return bookingDao.getAllBooking(); // return [] if none
     }
 
-    public Booking getBoookingById(Integer id) {
-        Optional<Booking> booking=bookingDao.getBookingById(id);
-        if(booking.isPresent()) {
-        	return booking.get();
-        }
-        else {
-        	throw new BookingNotFoundException("Booking not found with id "+id);
-        }
-        
+    // READ BY ID =====================================
+    public Booking getBookingById(Integer id) {
+        return bookingDao.getBookingById(id)
+                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id " + id));
     }
 
+    // READ BY FLIGHT ==================================
     public List<Booking> getBookingByFlightId(Integer id) {
         return bookingDao.getBookingByFlightId(id);
     }
-    
+
+    // READ BY DATE ====================================
     public List<Booking> getBookingsByDate(LocalDateTime date) {
-        List<Booking> bookings=bookingDao.getBookingByDate(date);
-        if(!bookings.isEmpty()) {
-     	   return bookings;
-        }
-        throw new NoRecordException("No Record Found for date "+date);
-     }
-    
+        return bookingDao.getBookingByDate(date);
+    }
+
+    // READ BY STATUS ==================================
     public List<Booking> getBookingByStatus(BookingStatus status) {
-    	List<Booking> bookings=bookingDao.getBookingByStatus(status);
-    	if(!bookings.isEmpty()) {
-    		return bookings;
-    	}
-    	throw new BookingNotFoundException("Booking not found");
-        
+        return bookingDao.getBookingByStatus(status);
     }
-    
+
+    // PASSENGERS ======================================
     public List<Passenger> getAllPassengers(Integer id) {
-		Optional<Booking> booking=bookingDao.getBookingById(id);
-		if(booking.isPresent()) {
-			return booking.get().getPassengers();
-		}
-		throw new BookingNotFoundException("booking not found");
-	}
-    public Payment getPayment(Integer id) {
-		Optional<Booking> booking = bookingDao.getBookingById(id);
-		if(booking.isPresent()) {
-			return booking.get().getPayment();
-		}
-		throw new BookingNotFoundException("No Payment details found");
-	}
-    
-    public Booking updateBookingStatus(Integer id, BookingStatus statusStr) {
-    	Optional<Booking> opt=bookingRepository.findById(id);
-    	if(opt.isPresent()) {
-    		Booking book=opt.get();
-    		book.setStatus(statusStr);
-    		return bookingRepository.save(book);
-    	}
-    	else {
-    		throw new IdNotFoundException("Booking not found with id "+id);
-    	}
+        Booking booking = getBookingById(id);
+        return booking.getPassengers();
     }
+
+    // PAYMENT ==========================================
+    public Payment getPayment(Integer id) {
+        Booking booking = getBookingById(id);
+        if (booking.getPayment() == null) {
+            throw new PaymentNotFound("No payment details found for booking id " + id);
+        }
+        return booking.getPayment();
+    }
+
+    // UPDATE STATUS ====================================
+    public Booking updateBookingStatus(Integer id, BookingStatus status) {
+        Booking booking = bookingRepository.findById(id)
+                .orElseThrow(() -> new IdNotFoundException("Booking not found with id " + id));
+        booking.setStatus(status);
+        return bookingRepository.save(booking);
+    }
+
+    // DELETE BOOKING ===================================
     public void deleteBooking(Integer id) {
         if (!bookingDao.existsBooking(id)) {
-            throw new BookingNotFoundException("Booking not found");
+            throw new BookingNotFoundException("Booking not found with id " + id);
         }
         bookingDao.deleteBooking(id);
     }
 
+    // PAGINATION + SORT ==============================
     public Page<Booking> getBookingByPaginationAndSorting(Integer pageNumber, Integer pageSize, String field) {
-        Page<Booking> bookings = bookingDao.getBookingByPageAndSort(pageNumber, pageSize, field);
-        if (!bookings.isEmpty()) {
-            return bookings;
-        }
-        throw new NoRecordException("No Records Found");
+        return bookingDao.getBookingByPageAndSort(pageNumber, pageSize, field);
     }
 }
-
