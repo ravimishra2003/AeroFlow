@@ -1,4 +1,4 @@
-# ✈️ Flight Booking Management System
+# ✈️ AeroFlow
 ### 🚀 Spring Boot | REST APIs | JPA | MySQL
 
 ![Java](https://img.shields.io/badge/Java-17-orange)
